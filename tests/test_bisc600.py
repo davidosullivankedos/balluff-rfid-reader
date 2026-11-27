@@ -151,6 +151,12 @@ class SfcTests(unittest.TestCase):
     def test_non_ascii_falls_back_to_hex(self):
         self.assertEqual(b.decode_sfc(b"\x01\x02\xab"), "HEX:0102AB")
 
+    def test_append_line_creates_missing_folder(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "balluff", "sfc_log.txt")
+            b.append_line(path, "x")
+            self.assertTrue(os.path.isfile(path))
+
     def test_append_line_one_per_call(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "log.txt")

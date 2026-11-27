@@ -22,7 +22,7 @@ Usage examples:
   python bisc600.py --port /dev/ttyUSB0 write 0 "HELLO"    # write ASCII
   python bisc600.py --port /dev/ttyUSB0 write 0 48454C4C4F --hex
   python bisc600.py --port COM3 watch --length 8           # loop: read 8 bytes whenever a tag shows up
-  python bisc600.py --port COM3 sfc --file sfc_log.txt     # log each tag read: "<date time>\t<HEX of whole tag>" per line
+  python bisc600.py --port COM3 sfc                        # log each tag read: "<date time>\t<HEX of whole tag>" per line
   python bisc600.py --port COM3 sfc --format sfc --length 32   # log decoded SFC text instead
 
 Add -v to see every raw byte on the wire (useful for the first test).
@@ -30,6 +30,7 @@ Add -v to see every raw byte on the wire (useful for the first test).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -60,6 +61,9 @@ ERRORS = {
     "E": "CRC error on tag",
     "I": "EEPROM error",
 }
+
+# Where `sfc` appends its log unless --file says otherwise.
+DEFAULT_LOG = r"C:\balluff\sfc_log.txt" if sys.platform == "win32" else "sfc_log.txt"
 
 MIN_GAP_S = 0.30  # manual: minimum 300 ms between telegrams, no continuous polling
 
@@ -329,7 +333,12 @@ def decode_sfc(data: bytes) -> str | None:
 
 
 def append_line(path: str, line: str):
-    """Append one line and close the file at once, so nothing is lost if the program stops."""
+    """Append one line and close the file at once, so nothing is lost if the program stops.
+
+    Creates the file's folder (e.g. C:\\balluff) if it doesn't exist yet.
+    """
+    folder = os.path.dirname(os.path.abspath(path))
+    os.makedirs(folder, exist_ok=True)
     with open(path, "a", encoding="utf-8", newline="") as fh:
         fh.write(line + "\r\n" if sys.platform == "win32" else line + "\n")
 
@@ -375,7 +384,8 @@ def main():
     w.add_argument("addr", type=int); w.add_argument("data"); w.add_argument("--hex", action="store_true")
     wt = sub.add_parser("watch"); wt.add_argument("--length", type=int, default=8)
     sf = sub.add_parser("sfc", help="log each tag read to a text file, one line per read")
-    sf.add_argument("--file", default="sfc_log.txt", help="log file to append to (default sfc_log.txt)")
+    sf.add_argument("--file", default=DEFAULT_LOG,
+                    help=f"log file to append to; its folder is created if needed (default {DEFAULT_LOG})")
     sf.add_argument("--addr", type=int, default=0, help="tag address to start reading (default 0)")
     sf.add_argument("--length", type=int, default=2048,
                     help="bytes to read (default 2048 = whole BIS C-122-11 tag, ~10 s)")
@@ -429,7 +439,7 @@ def main():
                     print(f"{time.strftime('%H:%M:%S')}  head {head}")
                     show(data)
         elif a.cmd == "sfc":
-            print(f"logging tag reads to {a.file} (Ctrl+C to stop)...")
+            print(f"logging tag reads to {os.path.abspath(a.file)} (Ctrl+C to stop)...")
             arrived = lambda h: print(f"{time.strftime('%H:%M:%S')}  tag on head {h}: "
                                       "reading, hold the part on the head...", flush=True)
             for head, data in tag_events(dev, a.addr, a.length, a.head, a.block, arrived):

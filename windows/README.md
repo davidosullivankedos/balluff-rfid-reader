@@ -7,11 +7,11 @@
 | `bisc600.exe` | The program. Needs no Python install. |
 | `start_sfc_logging.bat` | Double-click to start logging. **Edit `COM_PORT` in it first.** |
 | `list_com_ports.bat` | Double-click to see which COM port the reader is on. |
-| `sfc_log.txt` | Created on the first read, next to the .bat. One line per read. |
+| `C:\balluff\sfc_log.txt` | The log. Created (with its folder) on the first read. One line per read. Change `LOG_FILE` in `start_sfc_logging.bat` to put it elsewhere. |
 
 ## First-time setup
 
-1. Copy this folder to the station PC, e.g. `C:\BalluffLogger`.
+1. Copy this folder to the station PC, e.g. `C:\balluff`.
 2. Plug in the USB-RS232 adapter. Windows Update normally installs the Prolific driver by itself.
    If it shows with a yellow warning in Device Manager, install the PL2303 driver from Prolific's website.
 3. Double-click `list_com_ports.bat` and note the port, e.g. `COM4`.

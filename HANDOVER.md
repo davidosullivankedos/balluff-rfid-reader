@@ -167,3 +167,5 @@ Since the real SFC layout is unknown, **`sfc` now logs the whole tag by default*
 `windows/build.bat`, run on a Windows PC with python.org Python 3: creates `.venv-win`, installs pyserial + PyInstaller, runs the tests, builds `dist\bisc600.exe` (one file, console), and copies `start_sfc_logging.bat` (edit `COM_PORT`), `list_com_ports.bat` and the station `README.md` into `dist\`. Copy `dist\` to the station PC; it doesn't need Python.
 `.bat` files are CRLF (enforced by `.gitattributes`). A trial PyInstaller build on the Mac ran `selftest`, `ports` and `status` against the reader. **The Windows build itself hasn't been run yet.**
 GitHub: `git@github.com:davidosullivankedos/balluff-rfid-reader.git`. `.github/workflows/build-windows.yml` builds and smoke-tests the exe on a Windows runner for every push to `main`; download it from the run's **Artifacts** (`balluff-tag-logger-windows`).
+
+Log location: on Windows `sfc` defaults to **`C:\balluff\sfc_log.txt`** (folder created if missing); elsewhere `sfc_log.txt` in the current folder. Override with `--file` or `LOG_FILE` in `start_sfc_logging.bat`.
