@@ -167,5 +167,46 @@ class SfcTests(unittest.TestCase):
                                  ["2026-11-27 09:00:00\tA1", "2026-11-27 09:00:05\tB2"])
 
 
+# First 64 bytes of real tags (David's sample dumps, 27 Nov 2026)
+TAG_139 = bytes.fromhex(
+    "31333900000000000000000000000000" "4C563334393030202020202020202020"
+    "20202020004142353933323336000000" "00000100303030303030303001000000")
+TAG_332 = bytes.fromhex(
+    "33333200000000000000000000000000" "4C563334393030202020202020202020"
+    "20202020004142353933313931000000" "00000100303030303030303001000000")
+
+
+class TagFormatTests(unittest.TestCase):
+    def test_decode_sample_139(self):
+        self.assertEqual(b.decode_tag(TAG_139),
+                         {"TagFixID": "139", "TagPartNo": "LV34900", "TagSFC": "AB593236"})
+
+    def test_decode_sample_332_ignores_ff_beyond_64(self):
+        full = TAG_332 + b"\xff" * (2048 - 64)
+        self.assertEqual(b.decode_tag(full),
+                         {"TagFixID": "332", "TagPartNo": "LV34900", "TagSFC": "AB593191"})
+
+    def test_format_order_and_keys(self):
+        lines = b.format_tag(b.decode_tag(TAG_139)).splitlines()
+        self.assertEqual(lines, ["TagFixID=139", "TagPartNo=LV34900", "TagSFC=AB593236"])
+
+    def test_blank_tag_gives_empty_values(self):
+        self.assertEqual(b.decode_tag(bytes(64)),
+                         {"TagFixID": "", "TagPartNo": "", "TagSFC": ""})
+
+    def test_overwrite_replaces_not_appends(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "balluff", "sfc_log.txt")  # folder doesn't exist yet
+            b.overwrite_file(path, b.format_tag(b.decode_tag(TAG_139)))
+            b.overwrite_file(path, b.format_tag(b.decode_tag(TAG_332)))
+            with open(path, encoding="ascii") as fh:
+                self.assertEqual(fh.read().splitlines(),
+                                 ["TagFixID=332", "TagPartNo=LV34900", "TagSFC=AB593191"])
+            self.assertFalse(os.path.exists(path + ".tmp"))
+
+    def test_tag_read_is_one_page(self):
+        self.assertEqual(b.TAG_READ_LEN, 64)
+
+
 if __name__ == "__main__":
     unittest.main()

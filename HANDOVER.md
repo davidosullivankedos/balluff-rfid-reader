@@ -169,3 +169,30 @@ Since the real SFC layout is unknown, **`sfc` now logs the whole tag by default*
 GitHub: `git@github.com:davidosullivankedos/balluff-rfid-reader.git`. `.github/workflows/build-windows.yml` builds and smoke-tests the exe on a Windows runner for every push to `main`; download it from the run's **Artifacts** (`balluff-tag-logger-windows`).
 
 Log location: on Windows `sfc` defaults to **`C:\balluff\sfc_log.txt`** (folder created if missing); elsewhere `sfc_log.txt` in the current folder. Override with `--file` or `LOG_FILE` in `start_sfc_logging.bat`.
+
+## Tag record format + overwrite output (`sfc --format tag`, added 27 Nov 2026)
+
+Required station output, **overwritten on every read (never appended)**. Keep this if the format changes again:
+
+```
+TagFixID=139
+TagPartNo=LV34900
+TagSFC=AB593236
+```
+
+Layout worked out from David's three full-tag hex dumps (Example1/Example2 identical, plus sfc_log):
+
+| Bytes | Field | Format |
+|---|---|---|
+| 0–15 | TagFixID | ASCII, NUL padded (`139`, `332`) |
+| 16–36 | TagPartNo | ASCII, space padded (`LV34900`) |
+| 37–49 | TagSFC | ASCII, NUL padded (`AB593236`, `AB593191`) |
+| 50 / 52–59 / 60 | unknown | `0x01` / `00000000` / `0x01` |
+
+Field end offsets are inferred from three samples: confirm with whoever writes the tags. Bytes 64+ are unused (zeros, or 0xFF on one tag); byte 2047 is 0x04 on all samples.
+
+- `sfc --format tag` reads **64 bytes** (one page) instead of 2048, so ~0.5 s instead of the ~13 s David timed with the full read. The time was all page reads (32 × ~230 ms) plus 2 KB at 9600 baud (~2.4 s).
+- Output is written to `<file>.tmp` and swapped in with `os.replace`, so a reader never sees a half-written file. If another program has the file open, it falls back to a direct overwrite.
+- `decode-log <file> [--out f]` decodes old `date time<TAB>hex` logs into the same format.
+- Station PC reader is on **COM1**. `windows/start_sfc_logging.bat` now defaults to `COM_PORT=COM1` and runs `sfc --format tag --file C:\balluff\sfc_log.txt`.
+- `--format hex` (the default for the bare `sfc` command) is unchanged, for full-tag diagnostics.

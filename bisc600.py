@@ -24,6 +24,9 @@ Usage examples:
   python bisc600.py --port COM3 watch --length 8           # loop: read 8 bytes whenever a tag shows up
   python bisc600.py --port COM3 sfc                        # log each tag read: "<date time>\t<HEX of whole tag>" per line
   python bisc600.py --port COM3 sfc --format sfc --length 32   # log decoded SFC text instead
+  python bisc600.py --port COM1 sfc --format tag --file C:\\balluff\\sfc_log.txt
+        # on each tag: OVERWRITE the file with TagFixID= / TagPartNo= / TagSFC= (reads 64 bytes, ~0.5 s)
+  python bisc600.py decode-log sfc_log.txt                     # decode old hex logs to the Tag... format
 
 Add -v to see every raw byte on the wire (useful for the first test).
 """
@@ -332,6 +335,58 @@ def decode_sfc(data: bytes) -> str | None:
     return "HEX:" + trimmed.hex().upper()
 
 
+# ---- tag record layout (from sample dumps of BIS C-122-11 tags, 27 Nov 2026) --
+# 0-15   TagFixID    ASCII, NUL padded         e.g. "139", "332"
+# 16-36  TagPartNo   ASCII, space/NUL padded   e.g. "LV34900"
+# 37-49  TagSFC      ASCII, NUL padded         e.g. "AB593236"
+# 50     0x01        unknown
+# 52-59  "00000000"  unknown
+# 60     0x01        unknown
+# Only bytes 0-63 carry data, so `--format tag` reads 64 bytes (one page, ~0.5 s)
+# instead of the whole 2 KB tag (~10 s). Field end offsets are inferred from three
+# samples; confirm with whoever writes the tags.
+TAG_FIELDS = {
+    "TagFixID": (0, 16),
+    "TagPartNo": (16, 37),
+    "TagSFC": (37, 50),
+}
+TAG_READ_LEN = 64
+
+
+def decode_tag(data: bytes) -> dict[str, str]:
+    """Tag bytes -> {TagFixID, TagPartNo, TagSFC}; each field ends at its first NUL."""
+    out = {}
+    for name, (start, end) in TAG_FIELDS.items():
+        raw = data[start:end].split(b"\x00", 1)[0]
+        out[name] = raw.decode("ascii", errors="replace").strip()
+    return out
+
+
+def format_tag(fields: dict[str, str]) -> str:
+    nl = "\r\n" if sys.platform == "win32" else "\n"
+    return "".join(f"{k}={v}{nl}" for k, v in fields.items())
+
+
+def overwrite_file(path: str, text: str):
+    """Replace the file's whole contents (never append).
+
+    Written to a temp file then swapped in, so anything reading the file never
+    sees it half-written. Creates the folder if needed.
+    """
+    path = os.path.abspath(path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="ascii", errors="replace", newline="") as fh:
+        fh.write(text)
+    try:
+        os.replace(tmp, path)
+    except PermissionError:
+        # another program has the file open (Windows); fall back to a direct overwrite
+        with open(path, "w", encoding="ascii", errors="replace", newline="") as fh:
+            fh.write(text)
+        os.remove(tmp)
+
+
 def append_line(path: str, line: str):
     """Append one line and close the file at once, so nothing is lost if the program stops.
 
@@ -383,14 +438,20 @@ def main():
     w = sub.add_parser("write")
     w.add_argument("addr", type=int); w.add_argument("data"); w.add_argument("--hex", action="store_true")
     wt = sub.add_parser("watch"); wt.add_argument("--length", type=int, default=8)
-    sf = sub.add_parser("sfc", help="log each tag read to a text file, one line per read")
+    sf = sub.add_parser("sfc", help="write each tag read to a text file")
     sf.add_argument("--file", default=DEFAULT_LOG,
-                    help=f"log file to append to; its folder is created if needed (default {DEFAULT_LOG})")
+                    help=f"output file; its folder is created if needed (default {DEFAULT_LOG}). "
+                         "hex/sfc append one line per read; tag overwrites the file each read")
     sf.add_argument("--addr", type=int, default=0, help="tag address to start reading (default 0)")
-    sf.add_argument("--length", type=int, default=2048,
-                    help="bytes to read (default 2048 = whole BIS C-122-11 tag, ~10 s)")
-    sf.add_argument("--format", choices=["hex", "sfc"], default="hex",
-                    help="hex: every byte read, as hex (default). sfc: decode as ASCII SFC text")
+    sf.add_argument("--length", type=int, default=None,
+                    help=f"bytes to read (default {TAG_READ_LEN} for --format tag, "
+                         "2048 = whole BIS C-122-11 tag (~10 s) otherwise)")
+    sf.add_argument("--format", choices=["hex", "sfc", "tag"], default="hex",
+                    help="hex: every byte read, as hex (default). sfc: decode as ASCII SFC text. "
+                         "tag: overwrite the file with TagFixID=/TagPartNo=/TagSFC= lines")
+    dl = sub.add_parser("decode-log", help="decode a saved hex log (date time<TAB>hex) to Tag... lines")
+    dl.add_argument("file")
+    dl.add_argument("--out", help="also overwrite this file with the last record decoded")
     for sp in (r, w, wt, sf):
         sp.add_argument("--head", type=int, choices=[1, 2])
         sp.add_argument("--block", type=int, choices=[32, 64], default=64,
@@ -399,6 +460,17 @@ def main():
 
     if a.cmd == "selftest":
         sys.exit(0 if selftest() else 1)
+    if a.cmd == "decode-log":
+        text = None
+        with open(a.file, encoding="ascii", errors="replace") as fh:
+            for line in fh:
+                hexpart = line.strip().split("\t")[-1]
+                if hexpart:
+                    text = format_tag(decode_tag(bytes.fromhex(hexpart)))
+                    print(text, end="")
+        if a.out and text is not None:
+            overwrite_file(a.out, text)
+        return
     if a.cmd == "ports":
         if serial is None:
             sys.exit("pyserial is not installed: pip install pyserial")
@@ -439,13 +511,20 @@ def main():
                     print(f"{time.strftime('%H:%M:%S')}  head {head}")
                     show(data)
         elif a.cmd == "sfc":
-            print(f"logging tag reads to {os.path.abspath(a.file)} (Ctrl+C to stop)...")
+            length = a.length or (TAG_READ_LEN if a.format == "tag" else 2048)
+            verb = "writing each tag to" if a.format == "tag" else "logging tag reads to"
+            print(f"{verb} {os.path.abspath(a.file)} (Ctrl+C to stop)...")
             arrived = lambda h: print(f"{time.strftime('%H:%M:%S')}  tag on head {h}: "
                                       "reading, hold the part on the head...", flush=True)
-            for head, data in tag_events(dev, a.addr, a.length, a.head, a.block, arrived):
+            for head, data in tag_events(dev, a.addr, length, a.head, a.block, arrived):
                 if data is None:
                     continue
                 stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                if a.format == "tag":
+                    fields = decode_tag(data)
+                    overwrite_file(a.file, format_tag(fields))
+                    print(f"{stamp}  " + "  ".join(f"{k}={v}" for k, v in fields.items()))
+                    continue
                 if a.format == "hex":
                     value = data.hex().upper()
                     shown = f"{len(data)} bytes logged"
