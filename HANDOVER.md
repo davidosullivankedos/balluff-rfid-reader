@@ -173,3 +173,5 @@ Log location: on Windows `sfc` defaults to **`C:\balluff\sfc_log.txt`** (folder 
 ### ASCII log format (27 Nov 2026)
 
 Harry (who now has the unit) asked for text, not hex. `sfc` now defaults to `--format ascii`: whole tag read, printable runs (0x20–0x7E) kept, everything else dropped, runs joined with one space, e.g. `TEST-SFC-0001 harry Z` for the bench tag. `--format hex` keeps the old full-hex line. Waiting on an example from Harry (a hex log line for a real part, plus the SFC it should show) to pin down the SFC's address, length and encoding, then cut the read down from ~10 s.
+
+Blank tags are logged too (a valid read): the line is `date time<TAB>` with an empty value; the window shows `(blank tag)`.

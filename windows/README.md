@@ -28,7 +28,8 @@ To start it with Windows: press Win+R, type `shell:startup`, and put a shortcut 
 ```
 
 Date and time, a tab, then the text stored on the tag. Non-text filler bytes are dropped,
-and separate pieces of text are joined with a space. Tags with no text are not logged.
+and separate pieces of text are joined with a space. A tag with no text is still logged,
+with nothing after the tab (the window shows `(blank tag)`).
 To log every byte as hex instead, add `--format hex` to the `bisc600.exe` line in `start_sfc_logging.bat`.
 
 ## Troubleshooting

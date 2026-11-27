@@ -470,16 +470,11 @@ def main():
                     shown = f"{len(data)} bytes logged"
                 elif a.format == "ascii":
                     value = tag_text(data)
-                    if not value:
-                        print(f"{stamp}  no text on tag on head {head} - not logged", file=sys.stderr)
-                        continue
-                    shown = value
+                    shown = value or "(blank tag)"
                 else:
-                    value = decode_sfc(data)
-                    if value is None:
-                        print(f"{stamp}  blank tag on head {head} - not logged", file=sys.stderr)
-                        continue
-                    shown = value
+                    value = decode_sfc(data) or ""
+                    shown = value or "(blank tag)"
+                # A blank tag is still a valid read: log it with an empty value.
                 append_line(a.file, f"{stamp}\t{value}")
                 print(f"{stamp}  {shown}")
     except BisError as e:
