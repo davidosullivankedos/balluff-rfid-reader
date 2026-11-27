@@ -1,0 +1,44 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pyinstaller
+
+      - name: Run tests
+        run: python -m unittest -v
+
+      - name: Build bisc600.exe
+        run: python -m PyInstaller --onefile --console --clean --name bisc600 bisc600.py
+
+      - name: Smoke-test the exe
+        run: |
+          dist\bisc600.exe selftest
+          dist\bisc600.exe ports
+        shell: cmd
+
+      - name: Add station files
+        run: |
+          copy windows\start_sfc_logging.bat dist\
+          copy windows\list_com_ports.bat dist\
+          copy windows\README.md dist\README.md
+        shell: cmd
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: balluff-tag-logger-windows
+          path: dist/
