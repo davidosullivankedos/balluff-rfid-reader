@@ -32,7 +32,9 @@ TagSFC=AB593236
 ```
 
 Only the first 64 bytes of the tag are read, which is why it takes ~0.5 s rather than the ~10 s a full 2 KB read takes.
-The old full-tag hex log is still available: `bisc600.exe --port COM1 sfc --format hex`.
+A blank tag is still a valid read: the file is written with empty values (`TagFixID=` etc.).
+Other formats, for diagnostics, append one line per read instead: `--format ascii` (text on the tag)
+or `--format hex` (every byte).
 
 ## Troubleshooting
 

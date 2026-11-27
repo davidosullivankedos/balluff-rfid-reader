@@ -170,6 +170,12 @@ GitHub: `git@github.com:davidosullivankedos/balluff-rfid-reader.git`. `.github/w
 
 Log location: on Windows `sfc` defaults to **`C:\balluff\sfc_log.txt`** (folder created if missing); elsewhere `sfc_log.txt` in the current folder. Override with `--file` or `LOG_FILE` in `start_sfc_logging.bat`.
 
+### ASCII log format (27 Nov 2026)
+
+Harry (who now has the unit) asked for text, not hex. `sfc` now defaults to `--format ascii`: whole tag read, printable runs (0x20–0x7E) kept, everything else dropped, runs joined with one space, e.g. `TEST-SFC-0001 harry Z` for the bench tag. `--format hex` keeps the old full-hex line. Waiting on an example from Harry (a hex log line for a real part, plus the SFC it should show) to pin down the SFC's address, length and encoding, then cut the read down from ~10 s.
+
+Blank tags are logged too (a valid read): the line is `date time<TAB>` with an empty value; the window shows `(blank tag)`.
+
 ## Tag record format + overwrite output (`sfc --format tag`, added 27 Nov 2026)
 
 Required station output, **overwritten on every read (never appended)**. Keep this if the format changes again:
@@ -196,3 +202,7 @@ Field end offsets are inferred from three samples: confirm with whoever writes t
 - `decode-log <file> [--out f]` decodes old `date time<TAB>hex` logs into the same format.
 - Station PC reader is on **COM1**. `windows/start_sfc_logging.bat` now defaults to `COM_PORT=COM1` and runs `sfc --format tag --file C:\balluff\sfc_log.txt`.
 - `--format hex` (the default for the bare `sfc` command) is unchanged, for full-tag diagnostics.
+
+**Merged 27 Nov 2026:** the `tag` format above is the station output and supersedes the ASCII line log (still available as `--format ascii`, the default for a bare `sfc`). Fixes made while merging:
+- Blank tags: fields also end at the first `0xFF`, so a never-written tag (all FF) gives empty values instead of `????`. Blank reads are still written (empty values), matching "a blank tag is a valid read".
+- Locked output file: if the program reading `sfc_log.txt` has it open, the write retries for ~1 s; if it still can't, the logger prints a warning, skips that read and **keeps running** instead of crashing. The `.tmp` file is always cleaned up.

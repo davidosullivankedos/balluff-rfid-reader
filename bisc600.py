@@ -22,7 +22,8 @@ Usage examples:
   python bisc600.py --port /dev/ttyUSB0 write 0 "HELLO"    # write ASCII
   python bisc600.py --port /dev/ttyUSB0 write 0 48454C4C4F --hex
   python bisc600.py --port COM3 watch --length 8           # loop: read 8 bytes whenever a tag shows up
-  python bisc600.py --port COM3 sfc                        # log each tag read: "<date time>\t<HEX of whole tag>" per line
+  python bisc600.py --port COM3 sfc                        # log each tag read: "<date time>\t<text on tag>" per line
+  python bisc600.py --port COM3 sfc --format hex           # log every byte as hex instead
   python bisc600.py --port COM3 sfc --format sfc --length 32   # log decoded SFC text instead
   python bisc600.py --port COM1 sfc --format tag --file C:\\balluff\\sfc_log.txt
         # on each tag: OVERWRITE the file with TagFixID= / TagPartNo= / TagSFC= (reads 64 bytes, ~0.5 s)
@@ -354,11 +355,17 @@ TAG_READ_LEN = 64
 
 
 def decode_tag(data: bytes) -> dict[str, str]:
-    """Tag bytes -> {TagFixID, TagPartNo, TagSFC}; each field ends at its first NUL."""
+    """Tag bytes -> {TagFixID, TagPartNo, TagSFC}.
+
+    Each field ends at its first 0x00 or 0xFF byte: 0x00 is the padding seen on
+    written tags, 0xFF is what never-written tag memory reads as. So a blank tag
+    (zeros or FF) gives empty values rather than garbage.
+    """
     out = {}
     for name, (start, end) in TAG_FIELDS.items():
-        raw = data[start:end].split(b"\x00", 1)[0]
-        out[name] = raw.decode("ascii", errors="replace").strip()
+        raw = data[start:end]
+        cut = next((i for i, c in enumerate(raw) if c in (0x00, 0xFF)), len(raw))
+        out[name] = raw[:cut].decode("ascii", errors="replace").strip()
     return out
 
 
@@ -367,24 +374,64 @@ def format_tag(fields: dict[str, str]) -> str:
     return "".join(f"{k}={v}{nl}" for k, v in fields.items())
 
 
-def overwrite_file(path: str, text: str):
+class OutputBusy(OSError):
+    """The output file couldn't be written (e.g. another program has it locked)."""
+
+
+def overwrite_file(path: str, text: str, attempts: int = 5, wait: float = 0.2):
     """Replace the file's whole contents (never append).
 
     Written to a temp file then swapped in, so anything reading the file never
-    sees it half-written. Creates the folder if needed.
+    sees it half-written. Creates the folder if needed. If the swap is refused
+    (Windows: another program has the file open), falls back to overwriting in
+    place, retrying a few times. Raises OutputBusy if it still can't, and never
+    leaves the temp file behind.
     """
     path = os.path.abspath(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="ascii", errors="replace", newline="") as fh:
-        fh.write(text)
     try:
-        os.replace(tmp, path)
-    except PermissionError:
-        # another program has the file open (Windows); fall back to a direct overwrite
-        with open(path, "w", encoding="ascii", errors="replace", newline="") as fh:
+        with open(tmp, "w", encoding="ascii", errors="replace", newline="") as fh:
             fh.write(text)
-        os.remove(tmp)
+        last = None
+        for i in range(attempts):
+            try:
+                os.replace(tmp, path)
+                return
+            except OSError as e:
+                last = e
+            try:
+                with open(path, "w", encoding="ascii", errors="replace", newline="") as fh:
+                    fh.write(text)
+                return
+            except OSError as e:
+                last = e
+            if i < attempts - 1:
+                time.sleep(wait)
+        raise OutputBusy(f"could not write {path}: {last}")
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def tag_text(data: bytes) -> str:
+    """Tag bytes -> ASCII text: each run of printable characters, separated by one space.
+
+    Non-text bytes (00 and FF filler, anything outside 0x20-0x7E) are dropped, so
+    the result never contains tabs or line breaks and fits on one log line.
+    """
+    runs, cur = [], bytearray()
+    for c in data:
+        if 32 <= c < 127:
+            cur.append(c)
+        elif cur:
+            runs.append(cur.decode("ascii")); cur = bytearray()
+    if cur:
+        runs.append(cur.decode("ascii"))
+    return " ".join(r.strip() for r in runs if r.strip())
 
 
 def append_line(path: str, line: str):
@@ -446,9 +493,10 @@ def main():
     sf.add_argument("--length", type=int, default=None,
                     help=f"bytes to read (default {TAG_READ_LEN} for --format tag, "
                          "2048 = whole BIS C-122-11 tag (~10 s) otherwise)")
-    sf.add_argument("--format", choices=["hex", "sfc", "tag"], default="hex",
-                    help="hex: every byte read, as hex (default). sfc: decode as ASCII SFC text. "
-                         "tag: overwrite the file with TagFixID=/TagPartNo=/TagSFC= lines")
+    sf.add_argument("--format", choices=["ascii", "hex", "sfc", "tag"], default="ascii",
+                    help="ascii: append the text on the tag, filler dropped (default). "
+                         "hex: append every byte as hex. sfc: append one ASCII SFC string from --addr. "
+                         "tag: overwrite the file with TagFixID=/TagPartNo=/TagSFC= lines (station)")
     dl = sub.add_parser("decode-log", help="decode a saved hex log (date time<TAB>hex) to Tag... lines")
     dl.add_argument("file")
     dl.add_argument("--out", help="also overwrite this file with the last record decoded")
@@ -465,9 +513,15 @@ def main():
         with open(a.file, encoding="ascii", errors="replace") as fh:
             for line in fh:
                 hexpart = line.strip().split("\t")[-1]
-                if hexpart:
-                    text = format_tag(decode_tag(bytes.fromhex(hexpart)))
-                    print(text, end="")
+                if not hexpart:
+                    continue
+                try:
+                    data = bytes.fromhex(hexpart)
+                except ValueError:
+                    print(f"skipped (not a hex log line): {line.strip()[:60]}", file=sys.stderr)
+                    continue
+                text = format_tag(decode_tag(data))
+                print(text, end="")
         if a.out and text is not None:
             overwrite_file(a.out, text)
         return
@@ -522,19 +576,29 @@ def main():
                 stamp = time.strftime("%Y-%m-%d %H:%M:%S")
                 if a.format == "tag":
                     fields = decode_tag(data)
-                    overwrite_file(a.file, format_tag(fields))
-                    print(f"{stamp}  " + "  ".join(f"{k}={v}" for k, v in fields.items()))
+                    shown = "  ".join(f"{k}={v}" for k, v in fields.items())
+                    try:
+                        overwrite_file(a.file, format_tag(fields))
+                    except OSError as e:  # file locked by another program: skip this read, keep running
+                        print(f"{stamp}  {shown}  ** NOT SAVED: {e}", file=sys.stderr)
+                        continue
+                    print(f"{stamp}  {shown}")
                     continue
                 if a.format == "hex":
                     value = data.hex().upper()
                     shown = f"{len(data)} bytes logged"
+                elif a.format == "ascii":
+                    value = tag_text(data)
+                    shown = value or "(blank tag)"
                 else:
-                    value = decode_sfc(data)
-                    if value is None:
-                        print(f"{stamp}  blank tag on head {head} - not logged", file=sys.stderr)
-                        continue
-                    shown = value
-                append_line(a.file, f"{stamp}\t{value}")
+                    value = decode_sfc(data) or ""
+                    shown = value or "(blank tag)"
+                # A blank tag is still a valid read: log it with an empty value.
+                try:
+                    append_line(a.file, f"{stamp}\t{value}")
+                except OSError as e:
+                    print(f"{stamp}  {shown}  ** NOT SAVED: {e}", file=sys.stderr)
+                    continue
                 print(f"{stamp}  {shown}")
     except BisError as e:
         sys.exit(str(e))

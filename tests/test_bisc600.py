@@ -151,6 +151,21 @@ class SfcTests(unittest.TestCase):
     def test_non_ascii_falls_back_to_hex(self):
         self.assertEqual(b.decode_sfc(b"\x01\x02\xab"), "HEX:0102AB")
 
+    def test_tag_text_real_test_tag(self):
+        # layout of the bench test tag: SFC at 0, "harry" at 37, CE at 256, FF filler
+        data = bytearray(b"\xff" * 2048)
+        data[0:37] = b"TEST-SFC-0001" + bytes(24)
+        data[37:42] = b"harry"
+        data[42:256] = bytes(214)
+        data[256] = 0xCE
+        self.assertEqual(b.tag_text(bytes(data)), "TEST-SFC-0001 harry")
+
+    def test_tag_text_blank(self):
+        self.assertEqual(b.tag_text(b"\xff" * 64 + bytes(64)), "")
+
+    def test_tag_text_no_tabs_or_newlines(self):
+        self.assertEqual(b.tag_text(b"AB\tCD\r\nEF"), "AB CD EF")
+
     def test_append_line_creates_missing_folder(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "balluff", "sfc_log.txt")
@@ -202,6 +217,44 @@ class TagFormatTests(unittest.TestCase):
             with open(path, encoding="ascii") as fh:
                 self.assertEqual(fh.read().splitlines(),
                                  ["TagFixID=332", "TagPartNo=LV34900", "TagSFC=AB593191"])
+            self.assertFalse(os.path.exists(path + ".tmp"))
+
+    def test_never_written_tag_ff_gives_empty_values(self):
+        self.assertEqual(b.decode_tag(b"\xff" * 64),
+                         {"TagFixID": "", "TagPartNo": "", "TagSFC": ""})
+
+    def test_ff_padding_ends_field(self):
+        data = bytearray(b"\xff" * 64)
+        data[0:3] = b"139"
+        data[37:45] = b"AB593236"
+        self.assertEqual(b.decode_tag(bytes(data)),
+                         {"TagFixID": "139", "TagPartNo": "", "TagSFC": "AB593236"})
+
+    def test_overwrite_locked_file_raises_busy_and_cleans_up(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "sfc_log.txt")
+            real_open = open
+
+            def locked_open(f, mode="r", *a, **k):
+                if f == os.path.abspath(path) and "w" in mode:
+                    raise PermissionError("in use by another program")
+                return real_open(f, mode, *a, **k)
+
+            with mock.patch("os.replace", side_effect=PermissionError("in use")), \
+                 mock.patch("builtins.open", locked_open):
+                with self.assertRaises(b.OutputBusy):
+                    b.overwrite_file(path, "x", attempts=2, wait=0)
+            self.assertFalse(os.path.exists(path + ".tmp"))
+
+    def test_overwrite_falls_back_when_swap_refused(self):
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "sfc_log.txt")
+            with mock.patch("os.replace", side_effect=PermissionError("in use")):
+                b.overwrite_file(path, "TagSFC=AB1\n", wait=0)
+            with open(path) as fh:
+                self.assertEqual(fh.read(), "TagSFC=AB1\n")
             self.assertFalse(os.path.exists(path + ".tmp"))
 
     def test_tag_read_is_one_page(self):
