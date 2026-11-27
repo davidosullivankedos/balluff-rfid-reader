@@ -169,3 +169,7 @@ Since the real SFC layout is unknown, **`sfc` now logs the whole tag by default*
 GitHub: `git@github.com:davidosullivankedos/balluff-rfid-reader.git`. `.github/workflows/build-windows.yml` builds and smoke-tests the exe on a Windows runner for every push to `main`; download it from the run's **Artifacts** (`balluff-tag-logger-windows`).
 
 Log location: on Windows `sfc` defaults to **`C:\balluff\sfc_log.txt`** (folder created if missing); elsewhere `sfc_log.txt` in the current folder. Override with `--file` or `LOG_FILE` in `start_sfc_logging.bat`.
+
+### ASCII log format (27 Nov 2026)
+
+Harry (who now has the unit) asked for text, not hex. `sfc` now defaults to `--format ascii`: whole tag read, printable runs (0x20–0x7E) kept, everything else dropped, runs joined with one space, e.g. `TEST-SFC-0001 harry Z` for the bench tag. `--format hex` keeps the old full-hex line. Waiting on an example from Harry (a hex log line for a real part, plus the SFC it should show) to pin down the SFC's address, length and encoding, then cut the read down from ~10 s.

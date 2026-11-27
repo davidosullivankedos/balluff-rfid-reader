@@ -151,6 +151,21 @@ class SfcTests(unittest.TestCase):
     def test_non_ascii_falls_back_to_hex(self):
         self.assertEqual(b.decode_sfc(b"\x01\x02\xab"), "HEX:0102AB")
 
+    def test_tag_text_real_test_tag(self):
+        # layout of the bench test tag: SFC at 0, "harry" at 37, CE at 256, FF filler
+        data = bytearray(b"\xff" * 2048)
+        data[0:37] = b"TEST-SFC-0001" + bytes(24)
+        data[37:42] = b"harry"
+        data[42:256] = bytes(214)
+        data[256] = 0xCE
+        self.assertEqual(b.tag_text(bytes(data)), "TEST-SFC-0001 harry")
+
+    def test_tag_text_blank(self):
+        self.assertEqual(b.tag_text(b"\xff" * 64 + bytes(64)), "")
+
+    def test_tag_text_no_tabs_or_newlines(self):
+        self.assertEqual(b.tag_text(b"AB\tCD\r\nEF"), "AB CD EF")
+
     def test_append_line_creates_missing_folder(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "balluff", "sfc_log.txt")

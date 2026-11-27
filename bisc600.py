@@ -22,7 +22,8 @@ Usage examples:
   python bisc600.py --port /dev/ttyUSB0 write 0 "HELLO"    # write ASCII
   python bisc600.py --port /dev/ttyUSB0 write 0 48454C4C4F --hex
   python bisc600.py --port COM3 watch --length 8           # loop: read 8 bytes whenever a tag shows up
-  python bisc600.py --port COM3 sfc                        # log each tag read: "<date time>\t<HEX of whole tag>" per line
+  python bisc600.py --port COM3 sfc                        # log each tag read: "<date time>\t<text on tag>" per line
+  python bisc600.py --port COM3 sfc --format hex           # log every byte as hex instead
   python bisc600.py --port COM3 sfc --format sfc --length 32   # log decoded SFC text instead
 
 Add -v to see every raw byte on the wire (useful for the first test).
@@ -332,6 +333,23 @@ def decode_sfc(data: bytes) -> str | None:
     return "HEX:" + trimmed.hex().upper()
 
 
+def tag_text(data: bytes) -> str:
+    """Tag bytes -> ASCII text: each run of printable characters, separated by one space.
+
+    Non-text bytes (00 and FF filler, anything outside 0x20-0x7E) are dropped, so
+    the result never contains tabs or line breaks and fits on one log line.
+    """
+    runs, cur = [], bytearray()
+    for c in data:
+        if 32 <= c < 127:
+            cur.append(c)
+        elif cur:
+            runs.append(cur.decode("ascii")); cur = bytearray()
+    if cur:
+        runs.append(cur.decode("ascii"))
+    return " ".join(r.strip() for r in runs if r.strip())
+
+
 def append_line(path: str, line: str):
     """Append one line and close the file at once, so nothing is lost if the program stops.
 
@@ -389,8 +407,9 @@ def main():
     sf.add_argument("--addr", type=int, default=0, help="tag address to start reading (default 0)")
     sf.add_argument("--length", type=int, default=2048,
                     help="bytes to read (default 2048 = whole BIS C-122-11 tag, ~10 s)")
-    sf.add_argument("--format", choices=["hex", "sfc"], default="hex",
-                    help="hex: every byte read, as hex (default). sfc: decode as ASCII SFC text")
+    sf.add_argument("--format", choices=["ascii", "hex", "sfc"], default="ascii",
+                    help="ascii: the text on the tag, filler bytes dropped (default). "
+                         "hex: every byte read, as hex. sfc: one ASCII SFC string from --addr")
     for sp in (r, w, wt, sf):
         sp.add_argument("--head", type=int, choices=[1, 2])
         sp.add_argument("--block", type=int, choices=[32, 64], default=64,
@@ -449,6 +468,12 @@ def main():
                 if a.format == "hex":
                     value = data.hex().upper()
                     shown = f"{len(data)} bytes logged"
+                elif a.format == "ascii":
+                    value = tag_text(data)
+                    if not value:
+                        print(f"{stamp}  no text on tag on head {head} - not logged", file=sys.stderr)
+                        continue
+                    shown = value
                 else:
                     value = decode_sfc(data)
                     if value is None:

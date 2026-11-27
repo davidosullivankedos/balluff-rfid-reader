@@ -17,17 +17,19 @@
 3. Double-click `list_com_ports.bat` and note the port, e.g. `COM4`.
 4. Right-click `start_sfc_logging.bat` → **Edit**, set `COM_PORT=COM4`, save.
 5. Double-click `start_sfc_logging.bat`. Put a tagged part on the head and keep it there until
-   "bytes logged" appears (about 10 s for a full 2 KB tag).
+   its text appears in the window (about 10 s for a full 2 KB tag).
 
 To start it with Windows: press Win+R, type `shell:startup`, and put a shortcut to `start_sfc_logging.bat` in that folder.
 
 ## Log format
 
 ```
-2026-11-27 09:39:52<TAB>544553542D5346432D303030310000…
+2026-11-27 10:15:02<TAB>TEST-SFC-0001 harry
 ```
 
-Date and time, a tab, then every byte read from the tag as hex (4096 characters for a 2 KB tag).
+Date and time, a tab, then the text stored on the tag. Non-text filler bytes are dropped,
+and separate pieces of text are joined with a space. Tags with no text are not logged.
+To log every byte as hex instead, add `--format hex` to the `bisc600.exe` line in `start_sfc_logging.bat`.
 
 ## Troubleshooting
 
